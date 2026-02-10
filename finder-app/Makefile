@@ -1,16 +1,15 @@
-CC ?= $(CROSS_COMPILE)gcc
+CROSS_COMPILE ?=
+CC = $(CROSS_COMPILE)gcc
 CFLAGS ?= -Wall -Werror -g
-TARGET := writer
-OBJS := writer.o
 
-all: $(TARGET)
+all: writer
 
-$(TARGET): $(OBJS)
+writer: writer.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 writer.o: writer.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(TARGET) $(OBJS)
+	rm -f writer *.o
 
