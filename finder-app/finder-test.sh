@@ -1,8 +1,5 @@
+#!/bin/sh
 set -e
-
-make clean
-
-make
 
 testdir="/tmp/aesd-finder-test"
 writefile="$testdir/testfile.txt"
