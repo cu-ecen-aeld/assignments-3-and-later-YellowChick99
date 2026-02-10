@@ -5,6 +5,8 @@ testdir="/tmp/aesd-finder-test"
 writefile="$testdir/testfile.txt"
 writestr="AESD test string"
 
+cd "$(dirname "$0")"
+
 mkdir -p "$testdir"
 
 ./writer "$writefile" "$writestr"
