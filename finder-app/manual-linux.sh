@@ -18,10 +18,8 @@ kernel_repo=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 kernel_tag=v5.15.163
 kernel_dir=$outdir/linux-stable
 
-# ✅ FIX: correct busybox repo URL (busybox.net/git/busybox.git is not a git repo)
 busybox_repo=https://git.busybox.net/busybox/
 busybox_dir=$outdir/busybox
-# course-typical stable branch style: 1_33_stable, 1_36_stable, ...
 busybox_branch=1_33_stable
 
 rootfs=$outdir/rootfs
@@ -55,8 +53,10 @@ copy_deps() {
       done
 }
 
-echo "outdir: $outdir"
-echo "sysroot: $sysroot"
+echo "outdir:   $outdir"
+echo "sysroot:  $sysroot"
+echo "kernel:   $kernel_tag"
+echo "busybox:  $busybox_branch"
 
 ########################################
 # 1) kernel build
@@ -96,7 +96,6 @@ if [ ! -d "$busybox_dir/.git" ]; then
 fi
 
 cd "$busybox_dir"
-# ✅ checkout stable branch robustly
 git fetch --all --prune || true
 git checkout "$busybox_branch" 2>/dev/null || git checkout "remotes/origin/$busybox_branch"
 
@@ -111,10 +110,14 @@ make ARCH=$arch CROSS_COMPILE=$cross_prefix CONFIG_PREFIX="$rootfs" install
 copy_deps "$rootfs/bin/busybox"
 
 ########################################
-# 5) device nodes
+# 5) device nodes (may require sudo on CI)
 ########################################
-sudo mknod -m 666 "$rootfs/dev/null" c 1 3 || true
-sudo mknod -m 600 "$rootfs/dev/console" c 5 1 || true
+if [ ! -e "$rootfs/dev/null" ]; then
+  sudo mknod -m 666 "$rootfs/dev/null" c 1 3 || mknod -m 666 "$rootfs/dev/null" c 1 3 || true
+fi
+if [ ! -e "$rootfs/dev/console" ]; then
+  sudo mknod -m 600 "$rootfs/dev/console" c 5 1 || mknod -m 600 "$rootfs/dev/console" c 5 1 || true
+fi
 
 ########################################
 # 6) build writer (assignment2) and place into /home
@@ -130,7 +133,7 @@ elif [ -f "$repo_root/writer.c" ]; then
 fi
 
 if [ -z "$writer_src" ]; then
-  echo "writer.c not found (expected finder-app/writer.c)."
+  echo "writer.c not found (expected finder-app/writer.c or repo_root/writer.c)"
   exit 1
 fi
 
@@ -191,10 +194,17 @@ chmod +x "$rootfs/home/finder.sh" "$rootfs/home/finder-test.sh" "$rootfs/home/au
 sed -i 's#\.\./conf/assignment\.txt#conf/assignment.txt#g' "$rootfs/home/finder-test.sh"
 
 ########################################
-# 9) create initramfs
+# 9) create initramfs (avoid SIGPIPE 141 by splitting steps)
 ########################################
 cd "$rootfs"
-find . -print0 | cpio --null -ov --format=newc | gzip -9 > "$outdir/initramfs.cpio.gz"
+
+rm -f "$outdir/initramfs.cpio" "$outdir/initramfs.cpio.gz" "$outdir/filelist.bin"
+
+find . -print0 > "$outdir/filelist.bin"
+cpio --null -ov --format=newc < "$outdir/filelist.bin" > "$outdir/initramfs.cpio"
+gzip -9 -f "$outdir/initramfs.cpio"
+
+test -f "$outdir/initramfs.cpio.gz"
 
 echo "done."
 echo "kernel:    $outdir/Image"
