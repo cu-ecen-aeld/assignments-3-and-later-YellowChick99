@@ -18,9 +18,11 @@ kernel_repo=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 kernel_tag=v5.15.163
 kernel_dir=$outdir/linux-stable
 
-busybox_ver=1_33_1
-busybox_repo=https://busybox.net/git/busybox.git
+# ✅ FIX: correct busybox repo URL (busybox.net/git/busybox.git is not a git repo)
+busybox_repo=https://git.busybox.net/busybox/
 busybox_dir=$outdir/busybox
+# course-typical stable branch style: 1_33_stable, 1_36_stable, ...
+busybox_branch=1_33_stable
 
 rootfs=$outdir/rootfs
 
@@ -94,7 +96,9 @@ if [ ! -d "$busybox_dir/.git" ]; then
 fi
 
 cd "$busybox_dir"
-git checkout "$busybox_ver" || true
+# ✅ checkout stable branch robustly
+git fetch --all --prune || true
+git checkout "$busybox_branch" 2>/dev/null || git checkout "remotes/origin/$busybox_branch"
 
 make distclean
 make defconfig
@@ -193,6 +197,6 @@ cd "$rootfs"
 find . -print0 | cpio --null -ov --format=newc | gzip -9 > "$outdir/initramfs.cpio.gz"
 
 echo "done."
-echo "kernel:   $outdir/Image"
+echo "kernel:    $outdir/Image"
 echo "initramfs: $outdir/initramfs.cpio.gz"
-echo "rootfs:   $rootfs"
+echo "rootfs:    $rootfs"
