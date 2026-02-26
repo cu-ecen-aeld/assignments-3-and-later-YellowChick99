@@ -1,132 +1,105 @@
 #!/bin/bash
-set -euo pipefail
 
-outdir=${1:-/tmp/aeld}
-outdir=$(realpath "$outdir")
-mkdir -p "$outdir"
+set -e
+set -u
 
-arch=arm64
-cross_prefix=aarch64-none-linux-gnu-
-sysroot=$(${cross_prefix}gcc -print-sysroot)
+OUTDIR=/tmp/aesd-autograder
+KERNEL_REPO=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+KERNEL_VERSION=v5.15.163
+BUSYBOX_VERSION=1_33_1
+FINDER_APP_DIR=$(realpath $(dirname $0))
+ARCH=arm64
+CROSS_COMPILE=aarch64-none-linux-gnu-
 
-kernel_repo=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-kernel_tag=v5.15.163
-kernel_dir=$outdir/linux-stable
-
-busybox_repo=https://git.busybox.net/busybox/
-busybox_dir=$outdir/busybox
-busybox_branch=1_33_stable
-
-rootfs=$outdir/rootfs
-
-copy_lib() {
-  local src="$1"
-  local dst="$2"
-  if [ -e "$src" ]; then
-    mkdir -p "$(dirname "$dst")"
-    cp -a "$src" "$dst"
-  fi
-}
-
-copy_deps() {
-  local bin="$1"
-  local interp
-  interp=$(${cross_prefix}readelf -a "$bin" 2>/dev/null | awk '/program interpreter/ {gsub(/\[|\]/,"",$NF); print $NF; exit}')
-  if [ -n "${interp:-}" ]; then
-    copy_lib "$sysroot/$interp" "$rootfs/$interp"
-  fi
-
-  ${cross_prefix}readelf -d "$bin" 2>/dev/null \
-    | awk '/NEEDED/ {gsub(/\[|\]/,"",$NF); print $NF}' \
-    | while read -r lib; do
-        if [ -e "$sysroot/lib/$lib" ]; then
-          copy_lib "$sysroot/lib/$lib" "$rootfs/lib/$lib"
-        elif [ -e "$sysroot/usr/lib/$lib" ]; then
-          copy_lib "$sysroot/usr/lib/$lib" "$rootfs/usr/lib/$lib"
-        fi
-      done
-}
-
-if [ ! -d "$kernel_dir/.git" ]; then
-  rm -rf "$kernel_dir"
-  git clone --depth 1 --branch "$kernel_tag" "$kernel_repo" "$kernel_dir"
+if [ $# -lt 1 ]
+then
+	echo "Using default directory ${OUTDIR} for output"
 else
-  cd "$kernel_dir"
-  git fetch --depth 1 origin "refs/tags/$kernel_tag:refs/tags/$kernel_tag" || true
-  git checkout "$kernel_tag" || true
+	OUTDIR=$1
+	echo "Using passed directory ${OUTDIR} for output"
 fi
 
-if [ ! -f "$outdir/Image" ]; then
-  cd "$kernel_dir"
-  make ARCH=$arch CROSS_COMPILE=$cross_prefix mrproper
-  make ARCH=$arch CROSS_COMPILE=$cross_prefix defconfig
-  make -j"$(nproc)" ARCH=$arch CROSS_COMPILE=$cross_prefix Image
-  cp -a "$kernel_dir/arch/arm64/boot/Image" "$outdir/Image"
+mkdir -p ${OUTDIR}
+
+cd "$OUTDIR"
+if [ ! -d "${OUTDIR}/linux" ]; then
+    echo "CLONING GIT LINUX REPO SUBMODULE"
+	git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION} linux
+fi
+if [ ! -f "${OUTDIR}/linux/arch/${ARCH}/boot/Image" ]; then
+    cd linux
+    echo "Checking out version ${KERNEL_VERSION}"
+    git checkout ${KERNEL_VERSION}
+
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
+    make -j$(nproc) ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs
 fi
 
-if [ ! -d "$busybox_dir/.git" ]; then
-  rm -rf "$busybox_dir"
-  git clone "$busybox_repo" "$busybox_dir"
+echo "Adding the Image in outdir"
+cp ${OUTDIR}/linux/arch/${ARCH}/boot/Image ${OUTDIR}/
+
+echo "Creating the staging directory for the root filesystem"
+cd "$OUTDIR"
+if [ -d "${OUTDIR}/rootfs" ]
+then
+	echo "Deleting rootfs directory at ${OUTDIR}/rootfs and starting over"
+    rm  -rf ${OUTDIR}/rootfs
 fi
 
-cd "$busybox_dir"
-git fetch --all --prune || true
-git checkout "$busybox_branch" 2>/dev/null || git checkout "remotes/origin/$busybox_branch"
+mkdir -p ${OUTDIR}/rootfs
+cd ${OUTDIR}/rootfs
+mkdir -p bin dev etc home lib lib64 proc sbin sys tmp usr var
+mkdir -p usr/bin usr/lib usr/sbin
+mkdir -p var/log
 
-if [ ! -x "$rootfs/bin/busybox" ]; then
-  rm -rf "$rootfs"
-  mkdir -p "$rootfs"/{bin,sbin,etc,proc,sys,dev,tmp,usr/bin,usr/sbin,var,home,lib,usr/lib}
-  chmod 1777 "$rootfs/tmp"
-
-  make distclean
-  make defconfig
-  make -j"$(nproc)" ARCH=$arch CROSS_COMPILE=$cross_prefix
-  make ARCH=$arch CROSS_COMPILE=$cross_prefix CONFIG_PREFIX="$rootfs" install
-
-  copy_deps "$rootfs/bin/busybox"
-
-  if [ ! -e "$rootfs/dev/null" ]; then
-    sudo mknod -m 666 "$rootfs/dev/null" c 1 3 2>/dev/null || mknod -m 666 "$rootfs/dev/null" c 1 3 2>/dev/null || true
-  fi
-  if [ ! -e "$rootfs/dev/console" ]; then
-    sudo mknod -m 600 "$rootfs/dev/console" c 5 1 2>/dev/null || mknod -m 600 "$rootfs/dev/console" c 5 1 2>/dev/null || true
-  fi
+cd "$OUTDIR"
+if [ ! -d "${OUTDIR}/busybox" ]
+then
+    git clone https://github.com/mirror/busybox.git
+    cd busybox
+    git checkout ${BUSYBOX_VERSION}
+    make distclean
+    make defconfig
+else
+    cd busybox
 fi
 
-repo_root=$(cd "$(dirname "$0")/.." && pwd)
-finder_app_dir="$repo_root/finder-app"
+make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
+make CONFIG_PREFIX=${OUTDIR}/rootfs ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
 
-mkdir -p "$rootfs/home/conf"
+cd ${OUTDIR}/rootfs
+echo "Library dependencies"
+${CROSS_COMPILE}readelf -a bin/busybox | grep "program interpreter"
+${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
 
-writer_src=""
-if [ -f "$finder_app_dir/writer.c" ]; then
-  writer_src="$finder_app_dir/writer.c"
-elif [ -f "$repo_root/writer.c" ]; then
-  writer_src="$repo_root/writer.c"
-fi
-[ -n "$writer_src" ]
+SYSROOT=$(${CROSS_COMPILE}gcc -print-sysroot)
+cp -a ${SYSROOT}/lib/ld-linux-aarch64.so.1 ${OUTDIR}/rootfs/lib/
+cp -a ${SYSROOT}/lib64/libm.so.6 ${OUTDIR}/rootfs/lib64/
+cp -a ${SYSROOT}/lib64/libresolv.so.2 ${OUTDIR}/rootfs/lib64/
+cp -a ${SYSROOT}/lib64/libc.so.6 ${OUTDIR}/rootfs/lib64/
 
-${cross_prefix}gcc -Wall -Werror -O2 -o "$rootfs/home/writer" "$writer_src"
+sudo mknod -m 666 dev/null c 1 3
+sudo mknod -m 600 dev/console c 5 1
 
-cp -a "$finder_app_dir/finder.sh" "$rootfs/home/finder.sh"
-cp -a "$finder_app_dir/finder-test.sh" "$rootfs/home/finder-test.sh"
-[ -f "$finder_app_dir/autorun-qemu.sh" ] && cp -a "$finder_app_dir/autorun-qemu.sh" "$rootfs/home/autorun-qemu.sh" || true
-cp -a "$finder_app_dir/conf/username.txt" "$rootfs/home/conf/username.txt"
-cp -a "$finder_app_dir/conf/assignment.txt" "$rootfs/home/conf/assignment.txt"
+cd ${FINDER_APP_DIR}
+make clean
+make CROSS_COMPILE=${CROSS_COMPILE}
 
-chmod +x "$rootfs/home/finder.sh" "$rootfs/home/finder-test.sh" 2>/dev/null || true
-[ -f "$rootfs/home/autorun-qemu.sh" ] && chmod +x "$rootfs/home/autorun-qemu.sh" 2>/dev/null || true
+mkdir -p ${OUTDIR}/rootfs/home/conf
+cp writer ${OUTDIR}/rootfs/home/
+cp finder.sh ${OUTDIR}/rootfs/home/
+cp finder-test.sh ${OUTDIR}/rootfs/home/
+cp autorun-qemu.sh ${OUTDIR}/rootfs/home/
+cp conf/username.txt ${OUTDIR}/rootfs/home/conf/
+cp conf/assignment.txt ${OUTDIR}/rootfs/home/conf/
 
-sed -i 's#\.\./conf/assignment\.txt#conf/assignment.txt#g' "$rootfs/home/finder-test.sh"
+sed -i 's#\.\./conf/assignment\.txt#conf/assignment.txt#g' ${OUTDIR}/rootfs/home/finder-test.sh
 
-if [ ! -f "$outdir/initramfs.cpio.gz" ]; then
-  rm -f "$outdir/initramfs.cpio" "$outdir/initramfs.cpio.gz" "$outdir/filelist.bin"
-  cd "$rootfs"
-  find . -print0 > "$outdir/filelist.bin"
-  cpio --null -o --format=newc < "$outdir/filelist.bin" > "$outdir/initramfs.cpio"
-  gzip -9 -f "$outdir/initramfs.cpio"
-  test -f "$outdir/initramfs.cpio.gz"
-fi
+cd ${OUTDIR}/rootfs
+find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
+cd ${OUTDIR}
+gzip -f initramfs.cpio
 
-echo "$outdir/Image"
-echo "$outdir/initramfs.cpio.gz"
+echo "Build complete. Artifacts in ${OUTDIR}"
