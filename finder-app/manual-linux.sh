@@ -18,9 +18,6 @@ busybox_dir=$outdir/busybox
 busybox_branch=1_33_stable
 
 rootfs=$outdir/rootfs
-log="$outdir/manual-linux.log"
-
-exec > >(tee -a "$log") 2>&1
 
 copy_lib() {
   local src="$1"
@@ -50,43 +47,34 @@ copy_deps() {
       done
 }
 
-ensure_kernel() {
-  if [ ! -d "$kernel_dir/.git" ]; then
-    rm -rf "$kernel_dir"
-    git clone --depth 1 --branch "$kernel_tag" "$kernel_repo" "$kernel_dir"
-  else
-    cd "$kernel_dir"
-    git fetch --depth 1 origin "refs/tags/$kernel_tag:refs/tags/$kernel_tag" || true
-    git checkout "$kernel_tag" || true
-  fi
+if [ ! -d "$kernel_dir/.git" ]; then
+  rm -rf "$kernel_dir"
+  git clone --depth 1 --branch "$kernel_tag" "$kernel_repo" "$kernel_dir"
+else
+  cd "$kernel_dir"
+  git fetch --depth 1 origin "refs/tags/$kernel_tag:refs/tags/$kernel_tag" || true
+  git checkout "$kernel_tag" || true
+fi
 
-  if [ -f "$outdir/Image" ]; then
-    return 0
-  fi
-
+if [ ! -f "$outdir/Image" ]; then
   cd "$kernel_dir"
   make ARCH=$arch CROSS_COMPILE=$cross_prefix mrproper
   make ARCH=$arch CROSS_COMPILE=$cross_prefix defconfig
   make -j"$(nproc)" ARCH=$arch CROSS_COMPILE=$cross_prefix Image
   cp -a "$kernel_dir/arch/arm64/boot/Image" "$outdir/Image"
-}
+fi
 
-ensure_busybox_rootfs() {
-  if [ ! -d "$busybox_dir/.git" ]; then
-    rm -rf "$busybox_dir"
-    git clone "$busybox_repo" "$busybox_dir"
-  fi
+if [ ! -d "$busybox_dir/.git" ]; then
+  rm -rf "$busybox_dir"
+  git clone "$busybox_repo" "$busybox_dir"
+fi
 
-  cd "$busybox_dir"
-  git fetch --all --prune || true
-  git checkout "$busybox_branch" 2>/dev/null || git checkout "remotes/origin/$busybox_branch"
+cd "$busybox_dir"
+git fetch --all --prune || true
+git checkout "$busybox_branch" 2>/dev/null || git checkout "remotes/origin/$busybox_branch"
 
-  if [ -d "$rootfs" ] && [ -x "$rootfs/bin/busybox" ]; then
-    return 0
-  fi
-
+if [ ! -x "$rootfs/bin/busybox" ]; then
   rm -rf "$rootfs"
-  mkdir -p "$rootfs"
   mkdir -p "$rootfs"/{bin,sbin,etc,proc,sys,dev,tmp,usr/bin,usr/sbin,var,home,lib,usr/lib}
   chmod 1777 "$rootfs/tmp"
 
@@ -103,53 +91,41 @@ ensure_busybox_rootfs() {
   if [ ! -e "$rootfs/dev/console" ]; then
     sudo mknod -m 600 "$rootfs/dev/console" c 5 1 2>/dev/null || mknod -m 600 "$rootfs/dev/console" c 5 1 2>/dev/null || true
   fi
-}
+fi
 
-install_app_and_scripts() {
-  local repo_root
-  repo_root=$(cd "$(dirname "$0")/.." && pwd)
-  local finder_app_dir="$repo_root/finder-app"
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+finder_app_dir="$repo_root/finder-app"
 
-  mkdir -p "$rootfs/home/conf"
+mkdir -p "$rootfs/home/conf"
 
-  local writer_src=""
-  if [ -f "$finder_app_dir/writer.c" ]; then
-    writer_src="$finder_app_dir/writer.c"
-  elif [ -f "$repo_root/writer.c" ]; then
-    writer_src="$repo_root/writer.c"
-  fi
-  if [ -z "$writer_src" ]; then
-    exit 1
-  fi
-  ${cross_prefix}gcc -Wall -Werror -O2 -o "$rootfs/home/writer" "$writer_src"
+writer_src=""
+if [ -f "$finder_app_dir/writer.c" ]; then
+  writer_src="$finder_app_dir/writer.c"
+elif [ -f "$repo_root/writer.c" ]; then
+  writer_src="$repo_root/writer.c"
+fi
+[ -n "$writer_src" ]
 
-  cp -a "$finder_app_dir/finder.sh" "$rootfs/home/finder.sh"
-  cp -a "$finder_app_dir/finder-test.sh" "$rootfs/home/finder-test.sh"
-  [ -f "$finder_app_dir/autorun-qemu.sh" ] && cp -a "$finder_app_dir/autorun-qemu.sh" "$rootfs/home/autorun-qemu.sh" || true
-  cp -a "$finder_app_dir/conf/username.txt" "$rootfs/home/conf/username.txt"
-  cp -a "$finder_app_dir/conf/assignment.txt" "$rootfs/home/conf/assignment.txt"
+${cross_prefix}gcc -Wall -Werror -O2 -o "$rootfs/home/writer" "$writer_src"
 
-  chmod +x "$rootfs/home/finder.sh" "$rootfs/home/finder-test.sh" 2>/dev/null || true
-  [ -f "$rootfs/home/autorun-qemu.sh" ] && chmod +x "$rootfs/home/autorun-qemu.sh" 2>/dev/null || true
+cp -a "$finder_app_dir/finder.sh" "$rootfs/home/finder.sh"
+cp -a "$finder_app_dir/finder-test.sh" "$rootfs/home/finder-test.sh"
+[ -f "$finder_app_dir/autorun-qemu.sh" ] && cp -a "$finder_app_dir/autorun-qemu.sh" "$rootfs/home/autorun-qemu.sh" || true
+cp -a "$finder_app_dir/conf/username.txt" "$rootfs/home/conf/username.txt"
+cp -a "$finder_app_dir/conf/assignment.txt" "$rootfs/home/conf/assignment.txt"
 
-  sed -i 's#\.\./conf/assignment\.txt#conf/assignment.txt#g' "$rootfs/home/finder-test.sh"
-}
+chmod +x "$rootfs/home/finder.sh" "$rootfs/home/finder-test.sh" 2>/dev/null || true
+[ -f "$rootfs/home/autorun-qemu.sh" ] && chmod +x "$rootfs/home/autorun-qemu.sh" 2>/dev/null || true
 
-make_initramfs() {
+sed -i 's#\.\./conf/assignment\.txt#conf/assignment.txt#g' "$rootfs/home/finder-test.sh"
+
+if [ ! -f "$outdir/initramfs.cpio.gz" ]; then
   rm -f "$outdir/initramfs.cpio" "$outdir/initramfs.cpio.gz" "$outdir/filelist.bin"
   cd "$rootfs"
   find . -print0 > "$outdir/filelist.bin"
-  cpio --null -ov --format=newc < "$outdir/filelist.bin" > "$outdir/initramfs.cpio"
+  cpio --null -o --format=newc < "$outdir/filelist.bin" > "$outdir/initramfs.cpio"
   gzip -9 -f "$outdir/initramfs.cpio"
   test -f "$outdir/initramfs.cpio.gz"
-}
-
-ensure_kernel
-ensure_busybox_rootfs
-install_app_and_scripts
-
-if [ ! -f "$outdir/initramfs.cpio.gz" ]; then
-  make_initramfs
 fi
 
 echo "$outdir/Image"
