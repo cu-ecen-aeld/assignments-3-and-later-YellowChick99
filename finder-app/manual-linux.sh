@@ -78,7 +78,7 @@ cp writer ${OUTDIR}/rootfs/home/
 cp finder.sh ${OUTDIR}/rootfs/home/
 cp finder-test.sh ${OUTDIR}/rootfs/home/
 cp autorun-qemu.sh ${OUTDIR}/rootfs/home/
-cp -r conf ${OUTDIR}/rootfs/home/
+cp -aL conf ${OUTDIR}/rootfs/home/
 
 sed -i 's#\.\./conf/assignment\.txt#conf/assignment.txt#g' ${OUTDIR}/rootfs/home/finder-test.sh
 
