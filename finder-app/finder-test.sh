@@ -1,17 +1,20 @@
 #!/bin/sh
 set -e
 
-assignment_file="conf/assignment.txt"
+testdir="/tmp/aesd-finder-test"
+writefile="$testdir/testfile.txt"
+writestr="AESD test string"
 
-if [ ! -f "$assignment_file" ]; then
-  echo "assignment file not found: $assignment_file"
-  exit 1
+cd "$(dirname "$0")"
+
+mkdir -p "$testdir"
+
+./writer "$writefile" "$writestr"
+
+if ! grep -q "$writestr" "$writefile"; then
+    echo "ERROR: writer did not write expected content"
+    exit 1
 fi
 
-assignment=$(cat "$assignment_file" | tr -d '\n')
-
-echo "running assignment: $assignment"
-
-./finder.sh /home "$assignment" 2>/dev/null || true
-
 exit 0
+

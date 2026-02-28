@@ -1,13 +1,15 @@
-#include <syslog.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <syslog.h>
 
 int main(int argc, char *argv[])
 {
-    openlog(NULL, 0, LOG_USER);
+    openlog("writer", LOG_PID, LOG_USER);
 
     if (argc != 3) {
-        syslog(LOG_ERR, "Usage: %s <writefile> <writestr>", argv[0]);
+        syslog(LOG_ERR, "invalid arguments: expected 2, got %d", argc - 1);
         closelog();
         return 1;
     }
@@ -17,21 +19,27 @@ int main(int argc, char *argv[])
 
     FILE *fp = fopen(writefile, "w");
     if (!fp) {
-        syslog(LOG_ERR, "Error opening file: %s", writefile);
+        syslog(LOG_ERR, "failed to open file %s: %s", writefile, strerror(errno));
         closelog();
         return 1;
     }
 
-    syslog(LOG_DEBUG, "Writing \"%s\" to \"%s\"", writestr, writefile);
+    syslog(LOG_DEBUG, "Writing %s to %s", writestr, writefile);
 
-    if (fprintf(fp, "%s", writestr) < 0) {
-        syslog(LOG_ERR, "Error writing to file: %s", writefile);
+    if (fputs(writestr, fp) == EOF) {
+        syslog(LOG_ERR, "failed to write to file %s: %s", writefile, strerror(errno));
         fclose(fp);
         closelog();
         return 1;
     }
 
-    fclose(fp);
+    if (fclose(fp) != 0) {
+        syslog(LOG_ERR, "failed to close file %s: %s", writefile, strerror(errno));
+        closelog();
+        return 1;
+    }
+
     closelog();
     return 0;
 }
+

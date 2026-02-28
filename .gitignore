@@ -6,3 +6,10 @@ crosstool-ng
 aesd-build
 .vscode/
 test.sh.log
+
+# github actions runner (local only)
+actions-runner/
+# github actions self-hosted runner (must not be committed)
+conf/actions-runner/
+actions-runner/
+actions-runner/
