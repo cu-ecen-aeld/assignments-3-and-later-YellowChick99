@@ -1,15 +1,19 @@
-CROSS_COMPILE ?=
-CC = $(CROSS_COMPILE)gcc
-CFLAGS ?= -Wall -Werror -g
+cc ?= gcc
+cflags ?= -wall -werror -o2
+ldflags ?=
 
-all: writer
+target = writer
+obj = writer.o
 
-writer: writer.o
-	$(CC) $(CFLAGS) -o $@ $^
+all: $(target)
 
-writer.o: writer.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(target): $(obj)
+	$(cc) $(ldflags) -o $@ $^
+
+%.o: %.c
+	$(cc) $(cflags) -c -o $@ $<
 
 clean:
-	rm -f writer *.o
+	rm -f $(target) $(obj)
 
+.PHONY: all clean

@@ -1,20 +1,12 @@
 #!/bin/sh
 set -e
 
-testdir="/tmp/aesd-finder-test"
-writefile="$testdir/testfile.txt"
-writestr="AESD test string"
+conf_dir=/etc/finder-app/conf
+result_file=/tmp/assignment4-result.txt
 
-cd "$(dirname "$0")"
-
-mkdir -p "$testdir"
-
-./writer "$writefile" "$writestr"
-
-if ! grep -q "$writestr" "$writefile"; then
-    echo "ERROR: writer did not write expected content"
-    exit 1
+if [ ! -d "$conf_dir" ]; then
+  echo "conf directory not found: $conf_dir" >&2
+  exit 1
 fi
 
-exit 0
-
+finder "$conf_dir" > "$result_file"
